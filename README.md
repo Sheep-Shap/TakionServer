@@ -3,6 +3,7 @@
 Experimental Windows server that lets Chiaki-compatible Remote Play clients (for example
 [chiaki-ng](https://github.com/chiaki-ng/chiaki-ng) on Android) connect to your **PC** and stream the
 desktop or a game: video (HEVC), audio (Opus) and gamepad input through a virtual controller.
+The official Sony PS Remote Play app is **not** supported.
 
 > **Disclaimer.** This project is not affiliated with, endorsed or certified by Sony Interactive
 > Entertainment LLC. "PlayStation" and related marks belong to their owners. Use it only with
@@ -77,6 +78,7 @@ folder and reads and writes `server.ini` and `gui.ini` there.
 
 ## Known limitations
 
+- The official PS Remote Play app is not supported. Use [chiaki-ng](https://github.com/chiaki-ng/chiaki-ng) or another open-source client.
 - Experimental: expect bugs, especially under heavy GPU load in games
 - No remote access over the Internet; use a local network (5 GHz Wi-Fi or Ethernet is recommended)
 - Senkusha (MTU/RTT test) is not implemented; clients fall back to default values
