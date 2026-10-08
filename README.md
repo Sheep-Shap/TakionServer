@@ -81,6 +81,10 @@ folder and reads and writes `server.ini` and `gui.ini` there.
 - No remote access over the Internet; use a local network (5 GHz Wi-Fi or Ethernet is recommended)
 - Senkusha (MTU/RTT test) is not implemented; clients fall back to default values
 
+## Acknowledgments
+
+- [@cocainumgaming1488-arch](https://github.com/cocainumgaming1488-arch): testing of the NVENC encoder path on NVIDIA GPUs.
+
 ## Credits and license
 
 Parts of the protocol implementation are based on [Chiaki](https://github.com/thestr4ng3r/chiaki) /
