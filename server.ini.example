@@ -1,0 +1,22 @@
+# Remote server settings. Lines starting with # are comments.
+regist_port = 9295
+takion_port = 9296
+# 8 digits. Type this PIN on the phone when you register it.
+pin = 12345678
+nickname = My-PC-Server
+# 32 hex characters, or auto = generate a random key once and save it here.
+# Changing the key means the phone has to be registered again.
+rp_key = auto
+# Leave empty. Old bridge file written after /sess/init (not needed any more).
+session_state_file =
+# 1 = print every Ctrl message sent by the client
+log_ctrl_messages = 0
+# Video bitrate in Mbit/s. bitrate_max_mbps is the fixed bitrate unless adaptive_bitrate = 1,
+# in which case it is the start value and the ceiling, and bitrate_min_mbps is the floor.
+adaptive_bitrate = 0
+bitrate_min_mbps = 6
+bitrate_max_mbps = 20
+# 1 = never exceed the bitrate the client asks for (bwKbpsSent), 0 = always use bitrate_max_mbps.
+respect_client_bitrate = 1
+# Virtual gamepad type: ds4 or x360 (Xbox 360)
+controller_type = ds4

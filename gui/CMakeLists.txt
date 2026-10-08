@@ -1,0 +1,10 @@
+cmake_minimum_required(VERSION 3.20)
+project(takion_gui LANGUAGES CXX)
+set(CMAKE_CXX_STANDARD 17)
+find_package(Qt6 REQUIRED COMPONENTS Quick)
+qt_standard_project_setup(REQUIRES 6.5)
+
+qt_add_executable(takion_gui WIN32 main.cpp backend.cpp backend.h app.rc)
+qt_add_qml_module(takion_gui URI PsGui VERSION 1.0 QML_FILES Main.qml RESOURCES bg.jpg)
+target_link_libraries(takion_gui PRIVATE Qt6::Quick)
+set_target_properties(takion_gui PROPERTIES OUTPUT_NAME "TakionServerGUI")

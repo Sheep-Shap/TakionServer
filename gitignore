@@ -1,0 +1,33 @@
+# Сборка
+build/
+gui/build/
+out/
+x64/
+Release/
+Debug/
+*.exe
+*.obj
+*.pdb
+*.ilk
+*.lib
+*.dll
+CMakeCache.txt
+CMakeFiles/
+*.vcxproj.user
+.vs/
+
+# Секреты и личные данные: НЕ коммитить
+server.ini
+gui.ini
+session_state.json
+*.log
+chiaki_session_*.log
+dump.h265
+paste.txt
+*.key
+
+# Прочее
+*.tmp
+*.bak
+.DS_Store
+Thumbs.db
