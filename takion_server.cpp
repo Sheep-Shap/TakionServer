@@ -1975,10 +1975,10 @@ void TakionServer::send_init_ack(
 
     if (session.server_tag == 0) {
         session.server_tag = random_u32();
-        if (session.server_tag == 0) {
-            session.server_tag = 1;
-        }
+        if (session.server_tag == 0) session.server_tag = 1;
     }
+
+    session.server_seq = session.server_tag;
 
     if (session.server_seq == 0) {
         session.server_seq = random_u32();

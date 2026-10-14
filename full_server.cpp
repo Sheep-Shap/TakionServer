@@ -1,13 +1,21 @@
 #include "full_server.h"
 
 #include <algorithm>
+#include <atomic>
 #include <cctype>
 #include <chrono>
+#include <cstdint>
 #include <cstdio>
 #include <cstring>
+#include <ctime>
 #include <fstream>
 #include <iostream>
+#include <mutex>
+#include <random>
 #include <sstream>
+#include <string>
+#include <thread>
+#include <vector>
 
 #ifdef _WIN32
   #include <winsock2.h>
@@ -33,7 +41,7 @@ namespace {
 
 std::mutex g_log_mtx;
 
-void logf(const std::string& msg) {
+void srv_log(const std::string& msg) {
     std::lock_guard<std::mutex> lk(g_log_mtx);
     std::cout << "[full] " << msg << std::endl;
 }
@@ -145,6 +153,14 @@ std::string build_response_plaintext(const uint8_t regist_key[16], const Key16& 
     return s;
 }
 
+std::string make_session_id() {
+    static const char cs[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
+    std::random_device rd;
+    std::string id = std::to_string(static_cast<long long>(std::time(nullptr)));
+    while (id.size() < 64) id += cs[rd() % 36];
+    return id;
+}
+
 }  // namespace
 
 bool FullServer::start(const Config& cfg) {
@@ -154,7 +170,7 @@ bool FullServer::start(const Config& cfg) {
 #ifdef _WIN32
     WSADATA wsa;
     if (WSAStartup(MAKEWORD(2, 2), &wsa) != 0) {
-        logf("WSAStartup failed");
+        srv_log("WSAStartup failed");
         return false;
     }
     wsa_started_ = true;
@@ -169,7 +185,7 @@ bool FullServer::start(const Config& cfg) {
     NativeSock u = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
     NativeSock t = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
     if (u == invalid_native() || t == invalid_native()) {
-        logf("socket() failed");
+        srv_log("socket() failed");
         if (u != invalid_native()) close_native(u);
         if (t != invalid_native()) close_native(t);
         return false;
@@ -181,7 +197,7 @@ bool FullServer::start(const Config& cfg) {
     if (bind(u, reinterpret_cast<sockaddr*>(&addr), sizeof(addr)) != 0 ||
         bind(t, reinterpret_cast<sockaddr*>(&addr), sizeof(addr)) != 0 ||
         listen(t, 16) != 0) {
-        logf("bind/listen failed on port " + std::to_string(cfg_.port) +
+        srv_log("bind/listen failed on port " + std::to_string(cfg_.port) +
              " (port in use? is the old RegistrationServer or the Python server still running?)");
         close_native(u);
         close_native(t);
@@ -193,9 +209,9 @@ bool FullServer::start(const Config& cfg) {
     running_ = true;
     udp_thread_ = std::thread(&FullServer::udp_loop, this);
     tcp_thread_ = std::thread(&FullServer::tcp_loop, this);
-    logf("Discovery UDP responder listening on 0.0.0.0:" + std::to_string(cfg_.port));
-    logf("Unified server (regist + session/init + ctrl) listening on 0.0.0.0:" + std::to_string(cfg_.port));
-    logf("RP-Key = " + to_hex(cfg_.rp_key.data(), 16));
+    srv_log("Discovery UDP responder listening on 0.0.0.0:" + std::to_string(cfg_.port));
+    srv_log("Unified server (regist + session/init + ctrl) listening on 0.0.0.0:" + std::to_string(cfg_.port));
+    srv_log("RP-Key = " + to_hex(cfg_.rp_key.data(), 16));
     return true;
 }
 
@@ -249,12 +265,12 @@ void FullServer::udp_loop() {
         const char* reply = nullptr;
         if (text == "SRC3") reply = kRes3;
         else if (text == "SRC2") reply = kRes2;
-        else { logf("Discovery: unknown search packet (" + std::to_string(r) + " bytes)"); continue; }
+        else { srv_log("Discovery: unknown search packet (" + std::to_string(r) + " bytes)"); continue; }
 
         sendto(s, reply, 5, 0, reinterpret_cast<sockaddr*>(&from), fromlen);
         char ip[INET_ADDRSTRLEN] = {};
         inet_ntop(AF_INET, &from.sin_addr, ip, sizeof(ip));
-        logf(std::string("Discovery: ") + ip + ":" + std::to_string(ntohs(from.sin_port)) + " -> " + text);
+        srv_log(std::string("Discovery: ") + ip + ":" + std::to_string(ntohs(from.sin_port)) + " -> " + text);
     }
 }
 
@@ -288,7 +304,7 @@ void FullServer::handle_client(Handle sock, std::string peer) {
     const NativeSock s = ns(sock);
     Request req;
     if (!read_request(s, running_, req)) return;
-    logf("Request from " + peer + ": " + req.first_line);
+    srv_log("Request from " + peer + ": " + req.first_line);
     const std::string fl = lower(req.first_line);
     const bool is_ps5 = fl.find("ps5") != std::string::npos;
 
@@ -296,7 +312,7 @@ void FullServer::handle_client(Handle sock, std::string peer) {
         size_t content_length = 0;
         try { content_length = static_cast<size_t>(std::stoull(req.header("content-length").empty() ? "0" : req.header("content-length"))); }
         catch (...) { content_length = 0; }
-        if (content_length > (1u << 20)) { logf("Regist: request body too large"); return; }
+        if (content_length > (1u << 20)) { srv_log("Regist: request body too large"); return; }
         std::vector<uint8_t> body = req.leftover;
         while (body.size() < content_length) {
             if (!running_) return;
@@ -307,29 +323,30 @@ void FullServer::handle_client(Handle sock, std::string peer) {
             body.insert(body.end(), buf, buf + r);
         }
         if (body.size() >= kRegistInnerOffset) handle_regist(sock, is_ps5, body);
-        else logf("Regist: body is shorter than expected");
+        else srv_log("Regist: body is shorter than expected");
     } else if (req.first_line.find("/sess/init") != std::string::npos) {
         handle_init(sock);
     } else if (req.first_line.find("/sess/ctrl") != std::string::npos) {
-        if (handle_ctrl(sock, req.header("rp-auth"))) ctrl_message_loop(sock, peer);
+        CtrlCrypto cc;
+        if (handle_ctrl(sock, req.header("rp-auth"), cc)) ctrl_message_loop(sock, peer, cc);
     } else {
-        logf("Unknown path: " + req.first_line);
+        srv_log("Unknown path: " + req.first_line);
     }
 }
 
 void FullServer::handle_regist(Handle sock, bool is_ps5, const std::vector<uint8_t>& body) {
     RegistKeys k;
     if (!parse_regist_payload(body.data(), body.size(), is_ps5, cfg_.pin, k)) {
-        logf("Regist: failed to parse request body");
+        srv_log("Regist: failed to parse request body");
         return;
     }
     const auto plain_req = aes128_cfb(k.bright, k.iv, k.inner_encrypted.data(), k.inner_encrypted.size(), false);
-    logf("Regist: decrypted request:\n" + std::string(plain_req.begin(), plain_req.end()));
+    srv_log("Regist: decrypted request:\n" + std::string(plain_req.begin(), plain_req.end()));
 
     uint8_t regist_key[16], mac[6];
     random_bytes(regist_key, sizeof(regist_key));
     random_bytes(mac, sizeof(mac));
-    logf("Regist: RP-Key (fixed) = " + to_hex(cfg_.rp_key.data(), 16));
+    srv_log("Regist: RP-Key (fixed) = " + to_hex(cfg_.rp_key.data(), 16));
 
     const std::string plain = build_response_plaintext(regist_key, cfg_.rp_key, mac, cfg_.nickname, is_ps5);
     const auto enc = aes128_cfb(k.bright, k.iv, reinterpret_cast<const uint8_t*>(plain.data()), plain.size(), true);
@@ -338,7 +355,7 @@ void FullServer::handle_regist(Handle sock, bool is_ps5, const std::vector<uint8
     std::vector<uint8_t> resp(head.begin(), head.end());
     resp.insert(resp.end(), enc.begin(), enc.end());
     send_all(ns(sock), resp.data(), resp.size());
-    logf("Regist: response sent (" + std::to_string(resp.size()) + " bytes)");
+    srv_log("Regist: response sent (" + std::to_string(resp.size()) + " bytes)");
 }
 
 void FullServer::handle_init(Handle sock) {
@@ -352,66 +369,93 @@ void FullServer::handle_init(Handle sock) {
     if (!cfg_.session_state_path.empty()) {
         std::ofstream f(cfg_.session_state_path, std::ios::trunc);
         if (f) f << "{\"nonce\": \"" << to_hex(nonce.data(), 16) << "\", \"rp_key\": \"" << to_hex(cfg_.rp_key.data(), 16) << "\"}";
-        else logf("SessionInit: could not write " + cfg_.session_state_path);
+        else srv_log("SessionInit: could not write " + cfg_.session_state_path);
     }
     const std::string b64 = base64_encode(nonce.data(), nonce.size());
-    logf("SessionInit: generated RP-Nonce = " + b64 + " (raw=" + to_hex(nonce.data(), 16) + ")");
+    srv_log("SessionInit: generated RP-Nonce = " + b64 + " (raw=" + to_hex(nonce.data(), 16) + ")");
     send_all(ns(sock), "HTTP/1.1 200 Ok\r\nRP-Nonce: " + b64 + "\r\n\r\n");
-    logf("SessionInit: response sent");
+    srv_log("SessionInit: response sent");
 }
 
-bool FullServer::handle_ctrl(Handle sock, const std::string& rp_auth_b64) {
+bool FullServer::handle_ctrl(Handle sock, const std::string& rp_auth_b64, CtrlCrypto& cc) {
     Key16 nonce{};
     {
         std::lock_guard<std::mutex> lk(state_mtx_);
         if (!have_nonce_) {
-            logf("Ctrl: no saved nonce - GET /sess/init must come before /sess/ctrl");
+            srv_log("Ctrl: no saved nonce - GET /sess/init must come before /sess/ctrl");
             return false;
         }
         nonce = nonce_;
     }
     Key16 ambassador{}, bright{};
     ctrl_keys_ps5(nonce, cfg_.rp_key, ambassador, bright);
-    logf("Ctrl: ambassador=" + to_hex(ambassador.data(), 16) + " bright=" + to_hex(bright.data(), 16));
+    cc.ambassador = ambassador;
+    cc.bright = bright;
+    srv_log("Ctrl: ambassador=" + to_hex(ambassador.data(), 16) + " bright=" + to_hex(bright.data(), 16));
 
     const Key16 iv = generate_iv(ambassador, 0, true);
 
     if (!rp_auth_b64.empty()) {
         const auto ct = base64_decode(rp_auth_b64);
         const auto dec = aes128_cfb(bright, iv, ct.data(), ct.size(), false);
-        logf("Ctrl: RP-Auth decrypted -> " + to_hex(dec.data(), dec.size()) + " (should match RegistKey)");
+        srv_log("Ctrl: RP-Auth decrypted -> " + to_hex(dec.data(), dec.size()) + " (should match RegistKey)");
     }
 
-    uint8_t plain[16] = {2};                       // RP-Server-Type: first byte = 2 (PS5)
+    uint8_t plain[16] = {2};
     const auto enc = aes128_cfb(bright, iv, plain, sizeof(plain), true);
     const std::string b64 = base64_encode(enc.data(), enc.size());
     send_all(ns(sock), "HTTP/1.1 200 Ok\r\nRP-Server-Type: " + b64 + "\r\n\r\n");
-    logf("Ctrl: response sent (RP-Server-Type=" + b64 + ")");
+    srv_log("Ctrl: response sent (RP-Server-Type=" + b64 + ")");
     return true;
 }
 
-// After the response the client keeps the connection open and sends binary Ctrl messages:
-// 4 bytes size (BE), 2 bytes type (BE), 2 bytes reserved, then the payload.
-void FullServer::ctrl_message_loop(Handle sock, const std::string& peer) {
+bool FullServer::ctrl_send(Handle sock, CtrlCrypto& cc, uint16_t type,
+                           const uint8_t* payload, size_t n) {
+    std::string out(8, '\0');
+    out[0] = static_cast<char>((n >> 24) & 0xff);
+    out[1] = static_cast<char>((n >> 16) & 0xff);
+    out[2] = static_cast<char>((n >> 8) & 0xff);
+    out[3] = static_cast<char>(n & 0xff);
+    out[4] = static_cast<char>((type >> 8) & 0xff);
+    out[5] = static_cast<char>(type & 0xff);
+    if (n) {
+        const Key16 iv = generate_iv(cc.ambassador, cc.tx_counter, true);
+        const auto enc = aes128_cfb(cc.bright, iv, payload, n, true);
+        cc.tx_counter++;
+        out.append(reinterpret_cast<const char*>(enc.data()), enc.size());
+    }
+    return send_all(ns(sock), out);
+}
+
+void FullServer::ctrl_message_loop(Handle sock, const std::string& peer, CtrlCrypto& cc) {
     const NativeSock s = ns(sock);
+
+    const std::string sid = make_session_id();
+    std::vector<uint8_t> sp;
+    sp.push_back(0x4a);
+    sp.insert(sp.end(), sid.begin(), sid.end());
+    ctrl_send(sock, cc, 0x33, sp.data(), sp.size());
+    srv_log("Ctrl: session id sent (" + sid + ")");
+
     for (;;) {
         uint8_t header[8];
         if (!read_exactly(s, running_, header, sizeof(header))) break;
-        const uint32_t size = (uint32_t(header[0]) << 24) | (uint32_t(header[1]) << 16) | (uint32_t(header[2]) << 8) | header[3];
+        const uint32_t size = (uint32_t(header[0]) << 24) | (uint32_t(header[1]) << 16) |
+                              (uint32_t(header[2]) << 8) | header[3];
         const uint16_t type = static_cast<uint16_t>((header[4] << 8) | header[5]);
-        if (size > (16u << 20)) { logf("Ctrl: message too large, closing " + peer); break; }
+        if (size > (16u << 20)) { srv_log("Ctrl: message too large, closing " + peer); break; }
         std::vector<uint8_t> payload(size);
         if (size && !read_exactly(s, running_, payload.data(), size)) break;
         if (cfg_.log_ctrl_messages) {
             char t[16];
             std::snprintf(t, sizeof(t), "0x%x", type);
-            logf(std::string("Ctrl: received message type=") + t + " size=" + std::to_string(size) + " from " + peer);
+            srv_log(std::string("Ctrl: received message type=") + t + " size=" + std::to_string(size) + " from " + peer);
         }
         CtrlCallback cb;
         { std::lock_guard<std::mutex> lk(cb_mtx_); cb = ctrl_cb_; }
         if (cb) cb(type, payload);
     }
-    logf("Ctrl: connection closed " + peer);
+    srv_log("Ctrl: connection closed " + peer);
 }
 
 }  // namespace ps

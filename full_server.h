@@ -13,6 +13,12 @@
 
 namespace ps {
 
+struct CtrlCrypto {
+    Key16 ambassador{};
+    Key16 bright{};
+    uint64_t tx_counter = 1;   // 0 уже ушёл в RP-Server-Type
+};
+
 class FullServer {
 public:
     struct Config {
@@ -49,8 +55,9 @@ private:
     void handle_client(Handle sock, std::string peer);
     void handle_regist(Handle sock, bool is_ps5, const std::vector<uint8_t>& body);
     void handle_init(Handle sock);
-    bool handle_ctrl(Handle sock, const std::string& rp_auth_b64);
-    void ctrl_message_loop(Handle sock, const std::string& peer);
+    bool handle_ctrl(Handle sock, const std::string& rp_auth_b64, CtrlCrypto& cc);
+    void ctrl_message_loop(Handle sock, const std::string& peer, CtrlCrypto& cc);
+    bool ctrl_send(Handle sock, CtrlCrypto& cc, uint16_t type, const uint8_t* payload, size_t n);
 
     Config cfg_;
     std::atomic<bool> running_{false};
