@@ -14,6 +14,8 @@ The official Sony PS Remote Play app is **not** supported.
 - Registration (PIN), session init and Takion stream compatible with Chiaki clients
 - Video encoding with **AMD AMF** or **NVIDIA NVENC** (HEVC), DXGI screen capture
 - Reed-Solomon FEC and packet pacing in a separate sender thread
+- Senkusha (RTT / MTU probe) responder, so clients no longer wait for a timeout before the stream starts
+- NVENC intra refresh when the GPU supports it (self-healing picture after packet loss)
 - Audio capture and Opus streaming
 - Virtual gamepad via ViGEm: DualShock 4 or Xbox 360 (`controller_type` in `server.ini`)
 - Bitrate limits that follow the client's request
@@ -76,12 +78,42 @@ folder and reads and writes `server.ini` and `gui.ini` there.
 | `respect_client_bitrate` | Do not exceed the bitrate asked by the client |
 | `controller_type` | `ds4` or `x360` |
 
+## Network ports
+
+Allow these ports for `takion-host.exe` in Windows Firewall (private network):
+
+| Port | Protocol | Purpose |
+|---|---|---|
+| 9295 | TCP + UDP | Discovery, registration, session init and control channel |
+| 9296 | UDP | Takion stream (video, audio, gamepad) |
+| 9297 | UDP | Senkusha (RTT / MTU test) |
+
+## Troubleshooting
+
+**Artifacts or broken picture.** Keep the video bitrate close to what the client asks for
+(about 10 Mbit/s over Wi-Fi). Set `respect_client_bitrate = 1` and a moderate
+`bitrate_max_mbps`. Very high limits make the encoder produce huge frames (especially IDR
+frames) that do not fit into the FEC budget and are easily lost on Wi-Fi. At startup the console
+should print a line like `[nvenc] target=10000000 ...` when the client's bitrate is applied.
+
+**The stream starts slowly (about 15 seconds).** The client probably cannot reach the Senkusha
+responder. Make sure UDP port 9297 is allowed in the firewall. The console prints
+`[senkusha] responder listening on UDP 9297` on start, and the client log should show
+`Senkusha determined average RTT` instead of `Senkusha connect timeout`.
+
+**Client log shows `FEC failed` / `Missing unit`.** Packets are lost between the PC and the
+client. Use 5 GHz Wi-Fi or Ethernet, disable Wi-Fi power saving on the phone and lower the bitrate.
+
 ## Known limitations
 
 - The official PS Remote Play app is not supported. Use [chiaki-ng](https://github.com/chiaki-ng/chiaki-ng) or another open-source client.
 - Experimental: expect bugs, especially under heavy GPU load in games
 - No remote access over the Internet; use a local network (5 GHz Wi-Fi or Ethernet is recommended)
-- Senkusha (MTU/RTT test) is not implemented; clients fall back to default values
+- Senkusha supports the RTT and MTU tests only; the bandwidth command is ignored
+
+## Changelog
+
+See [CHANGELOG.md](CHANGELOG.md).
 
 ## Acknowledgments
 

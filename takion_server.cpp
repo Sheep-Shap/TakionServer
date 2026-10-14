@@ -1,6 +1,7 @@
 // takion_server.cpp
 #include "takion_server.h"
 #include "takion_proto.h"
+#include "senkusha_server.h"
 #include "crypto.h"
 #include "gkcrypt.h"
 #include "virtual_pad.h"
@@ -40,6 +41,8 @@
 
 #pragma comment(lib, "winmm.lib")
 #pragma comment(lib, "bcrypt.lib")
+
+static SenkushaServer g_senkusha;
 
 static int64_t now_ms() {
     return std::chrono::duration_cast<std::chrono::milliseconds>(
@@ -225,6 +228,8 @@ bool TakionServer::start(uint16_t port) {
     std::cout << "Takion server started on UDP port " << port << "\n";
     tx_run_ = true;
     tx_thread_ = std::thread([this] { tx_loop(); });
+    if (!g_senkusha.start(9297))
+        std::cerr << "[senkusha] failed to start on UDP 9297 (client will use fallback MTU/RTT)\n";
     timeBeginPeriod(1);
     return true;
 }
@@ -248,6 +253,7 @@ void TakionServer::stop() {
         closesocket(udp_socket_);
         udp_socket_ = INVALID_SOCKET;
     }
+    g_senkusha.stop();
     timeEndPeriod(1);
     WSACleanup();
 }

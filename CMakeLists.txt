@@ -27,6 +27,7 @@ set(SOURCES
     amf_encoder.cpp
     dxgi_capture.cpp
     takion_server.cpp
+    senkusha_server.cpp
     rpcrypt.cpp
     crypto.cpp
     http_client.cpp
@@ -46,6 +47,7 @@ set(HEADERS
     amf_encoder.h
     dxgi_capture.h
     takion_server.h
+    senkusha_server.h
     crypto.h
     takion_proto.h
     http_client.h
