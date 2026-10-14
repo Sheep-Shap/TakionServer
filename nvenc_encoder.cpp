@@ -113,12 +113,23 @@ bool NvencEncoder::initialize(int w, int h, int fps, int bitrate_bps, int max_bi
     d.cfg.rcParams.rateControlMode = NV_ENC_PARAMS_RC_CBR;
     d.cfg.rcParams.averageBitRate = (uint32_t)bitrate_bps;
     d.cfg.rcParams.maxBitRate = (uint32_t)bitrate_bps;
-    d.cfg.rcParams.vbvBufferSize = (uint32_t)(bitrate_bps / 20);  
+    d.cfg.rcParams.vbvBufferSize   = (uint32_t)(bitrate_bps / 20);  
     d.cfg.rcParams.vbvInitialDelay = d.cfg.rcParams.vbvBufferSize;
     auto& hc = d.cfg.encodeCodecConfig.hevcConfig;
     hc.maxNumRefFramesInDPB = 1;
     hc.numRefL0 = NV_ENC_NUM_REF_FRAMES_1;
     hc.sliceMode = 0;
+    NV_ENC_CAPS_PARAM cp{};
+    cp.version = NV_ENC_CAPS_PARAM_VER;
+    cp.capsToQuery = NV_ENC_CAPS_SUPPORT_INTRA_REFRESH;
+    int ir_ok = 0;
+    d.api.nvEncGetEncodeCaps(d.enc, codec, &cp, &ir_ok);
+    if (ir_ok) {
+        hc.enableIntraRefresh = 0;
+        hc.intraRefreshPeriod = 60;   // новый цикл каждую секунду при 60 fps
+        hc.intraRefreshCnt    = 20;   // экран обновляется за 20 кадров (~0,33 с)
+    }
+    std::cout << "[nvenc] intra refresh: " << (ir_ok ? "on" : "unsupported") << "\n";
     d.cfg.rcParams.enableAQ = 1;
     d.cfg.rcParams.enableLookahead = 0;
     d.cfg.rcParams.zeroReorderDelay = 1;
@@ -264,7 +275,7 @@ bool NvencEncoder::set_bitrate(int bitrate_bps, int max_bitrate_bps) {
     Impl& d = *d_;
     d.cfg.rcParams.averageBitRate = (uint32_t)bitrate_bps;
     d.cfg.rcParams.maxBitRate = (uint32_t)bitrate_bps;
-    d.cfg.rcParams.vbvBufferSize = (uint32_t)(bitrate_bps / 20);
+    d.cfg.rcParams.vbvBufferSize   = (uint32_t)(bitrate_bps / 20);
     d.cfg.rcParams.vbvInitialDelay = d.cfg.rcParams.vbvBufferSize;
     NV_ENC_RECONFIGURE_PARAMS rp{};
     rp.version = NV_ENC_RECONFIGURE_PARAMS_VER;

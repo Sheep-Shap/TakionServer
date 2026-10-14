@@ -35,8 +35,10 @@
 
 #include <windows.h>
 #include <bcrypt.h>
+#include <timeapi.h>
 #include <intrin.h>
 
+#pragma comment(lib, "winmm.lib")
 #pragma comment(lib, "bcrypt.lib")
 
 static int64_t now_ms() {
@@ -223,6 +225,7 @@ bool TakionServer::start(uint16_t port) {
     std::cout << "Takion server started on UDP port " << port << "\n";
     tx_run_ = true;
     tx_thread_ = std::thread([this] { tx_loop(); });
+    timeBeginPeriod(1);
     return true;
 }
 
@@ -245,6 +248,7 @@ void TakionServer::stop() {
         closesocket(udp_socket_);
         udp_socket_ = INVALID_SOCKET;
     }
+    timeEndPeriod(1);
     WSACleanup();
 }
 
@@ -1083,7 +1087,7 @@ int64_t TakionServer::effective_max_bps(const ClientSession& s) const {
     int64_t bps = net_cfg_.max_bps;
     if (net_cfg_.respect_client && s.client_bw_kbps > 0)
         bps = (std::min)(bps, s.client_bw_kbps * 1000);
-    return (std::max)(bps, (int64_t)2'000'000);
+    return (std::min<int64_t>)(bps, 15000000);   // потолок 15 Мбит/с
 }
 
 // --- Извлечение handshakeKey из JSON ---
@@ -1486,7 +1490,7 @@ static inline void pace_until(const std::chrono::steady_clock::time_point& t) {
 void TakionServer::tx_post(TxJob&& j) {
     {
         std::lock_guard<std::mutex> lk(tx_mtx_);
-        if (tx_q_.size() >= 4) { tx_q_.clear(); idr_requested_ = true; }  // отстали: просим свежий IDR
+        if (tx_q_.size() >= 4) { tx_q_.clear(); idr_requested_ = true; idr_urgent_ = true; ++tx_overflow_; }  // отстали: просим свежий IDR
         tx_q_.push_back(std::move(j));
     }
     tx_cv_.notify_one();
@@ -1551,9 +1555,12 @@ void TakionServer::send_video_frame(const sockaddr_in& addr, ClientSession& s,
         parity = fecrs::encode(blk.data(), kUnit, (unsigned)k, m);
     }
 
+    if (k > 200) printf("[video] WARNING: frame %zu KB needs %zu units, FEC limited\n",
+                        frame.size() / 1024, k);
+
     // Растягиваем кадр примерно на 30% времени кадра (с учётом парити-пакетов)
-    const auto frame_budget = std::chrono::microseconds(1000000 / VIDEO_FPS * 6 / 10);
-    const auto gap = (std::max)(std::chrono::microseconds(60),
+    const auto frame_budget = std::chrono::microseconds(1000000 / VIDEO_FPS * 85 / 100);
+    const auto gap = (std::max)(std::chrono::microseconds(150),
         std::chrono::duration_cast<std::chrono::microseconds>(frame_budget / (long long)total));
 
     static const bool kFecTestDrop = false;           // true только для проверки FEC
@@ -1744,7 +1751,11 @@ void TakionServer::video_thread(sockaddr_in addr, ClientSession* s) {
             if (cnt && double(sum) / cnt > 215) ++white_frames;
         }
 
-        if (idr_requested_.exchange(false) && clk::now() - last_idr > std::chrono::milliseconds(2000)) {
+        const auto min_gap = idr_urgent_.exchange(false) ? std::chrono::milliseconds(200)
+                                                         : std::chrono::milliseconds(2000);
+        if (idr_requested_.load() &&
+            clk::now() - last_idr > std::chrono::milliseconds(2000)) {
+            idr_requested_ = false;
             encoder_->force_idr();
             last_idr = clk::now();
         }
@@ -1755,7 +1766,7 @@ void TakionServer::video_thread(sockaddr_in addr, ClientSession* s) {
             break;
         }
 
-        const uint32_t period = (n < 2 * VIDEO_FPS) ? VIDEO_FPS / 2 : VIDEO_FPS * 10;
+        const uint32_t period = (n < 2 * VIDEO_FPS) ? VIDEO_FPS / 2 : VIDEO_FPS * 60;
         if (n && n % period == 0) { encoder_->force_idr(); last_idr = clk::now(); ++idr_per; }
 
         if (encode_send()) {

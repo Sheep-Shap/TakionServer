@@ -124,6 +124,8 @@ private:
     std::deque<TxJob> tx_q_;
     std::thread tx_thread_;
     std::atomic<bool> tx_run_{false};
+    std::atomic<bool>     idr_urgent_{false};
+    std::atomic<uint32_t> tx_overflow_{0};
     void tx_loop();
     void tx_post(TxJob&& j);
 
