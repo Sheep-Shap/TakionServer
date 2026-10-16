@@ -8,10 +8,14 @@ struct ServerConfig {
     uint16_t regist_port = 9295;        // UDP discovery + TCP registration/session (FullServer)
     uint16_t takion_port = 9296;        // UDP Takion stream
     uint32_t pin = 12345678;            // 8-digit PIN typed on the phone while registering
-    std::string nickname = "My-Fake-PS5";
+    std::string nickname = "My-PC-Server";
     std::string rp_key_hex = "00112233445566778899aabbccddeeff";   // 32 hex chars, or "auto"
     std::string session_state_file;     // empty = do not write the legacy JSON bridge file
     std::string controller_type = "ds4";   // "ds4" или "x360"
+    std::string encoder = "auto";   // auto | nvenc | amf
+    int  nvenc_preset   = 3;        // 1..7
+    std::string amf_preset = "balanced";   // speed | balanced | quality (AMD AMF)
+    bool intra_refresh  = false;      // experimental, applies to the active encoder
     bool log_ctrl_messages = false;
     bool adaptive_bitrate = false;      // lower/raise the video bitrate from the client's loss reports
     bool respect_client_bitrate = true;   // не превышать битрейт, заявленный клиентом

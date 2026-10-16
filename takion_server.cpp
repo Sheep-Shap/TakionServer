@@ -1626,6 +1626,16 @@ void TakionServer::send_video_frame(const sockaddr_in& addr, ClientSession& s,
     tx_post(std::move(job));
 }
 
+void TakionServer::select_encoder(const std::string& mode) {
+    if (mode == "nvenc") {
+        if (!NvencEncoder::available()) { std::cerr << "[enc] NVENC requested but not available\n"; return; }
+        encoder_ = std::make_unique<NvencEncoder>();
+    } else if (mode == "amf") {
+        encoder_ = std::make_unique<AMFEncoder>();
+    } else return;                              // auto: оставить выбор конструктора
+    std::cout << "[enc] forced encoder: " << mode << "\n";
+}
+
 static std::vector<uint8_t> load_hex_file(const char* path) {
     std::ifstream f(path);
     std::string s((std::istreambuf_iterator<char>(f)), std::istreambuf_iterator<char>());
@@ -1639,6 +1649,33 @@ static std::vector<uint8_t> load_hex_file(const char* path) {
         if (hi < 0) hi = v; else { out.push_back((uint8_t)((hi << 4) | v)); hi = -1; }
     }
     return out;
+}
+
+static void strip_param_sets(std::vector<uint8_t>& f) {
+    std::vector<size_t> starts;                       // позиции стартовых кодов
+    for (size_t k = 0; k + 3 < f.size(); ++k)
+        if (f[k] == 0 && f[k+1] == 0 && f[k+2] == 1) { starts.push_back(k); k += 2; }
+    if (starts.empty()) return;
+    std::vector<uint8_t> out;
+    out.reserve(f.size());
+    for (size_t i = 0; i < starts.size(); ++i) {
+        size_t b = starts[i];                          // начало NAL (после ведущих нулей)
+        size_t e = (i + 1 < starts.size()) ? starts[i + 1] : f.size();
+        while (e > b && f[e - 1] == 0 && i + 1 < starts.size()) --e;   // нули перед следующим кодом
+        const int type = (f[b + 3] >> 1) & 0x3f;
+        if (type == 32 || type == 33 || type == 34) continue;          // VPS/SPS/PPS
+        out.insert(out.end(), {0, 0, 0, 1});
+        out.insert(out.end(), f.begin() + b + 3, f.begin() + e);
+    }
+    if (!out.empty()) f.swap(out);
+}
+
+static std::vector<uint8_t> build_connection_quality_protobuf(uint32_t target_bps) {
+    std::vector<uint8_t> inner, msg;
+    append_varint_field(inner, 1, target_bps);     // ConnectionQualityPayload.target_bitrate
+    append_varint_field(msg, 1, 16);               // TakionMessage.type = CONNECTIONQUALITY
+    append_bytes_field(msg, 17, inner);            // connection_quality_payload
+    return msg;
 }
 
 void TakionServer::video_thread(sockaddr_in addr, ClientSession* s) {
@@ -1702,6 +1739,7 @@ void TakionServer::video_thread(sockaddr_in addr, ClientSession* s) {
         }
 
         idr_cnt += has_idr(h) ? 1 : 0;
+        strip_param_sets(h);                 // VPS/SPS/PPS уже переданы в STREAMINFO; клиент ждёт кадры только со слайсами
         const size_t sz = h.size();
         enqueue(std::move(h));
         auto c = clk::now();
@@ -1729,6 +1767,7 @@ void TakionServer::video_thread(sockaddr_in addr, ClientSession* s) {
     auto next = clk::now();
     auto last_idr = clk::now();
 
+    auto next_cq = clk::now() + std::chrono::seconds(1);
     auto t_report = clk::now();
     size_t max_frame = 0;
     double t_cap = 0, t_enc = 0, t_send = 0;
@@ -1757,8 +1796,7 @@ void TakionServer::video_thread(sockaddr_in addr, ClientSession* s) {
             if (cnt && double(sum) / cnt > 215) ++white_frames;
         }
 
-        const auto min_gap = idr_urgent_.exchange(false) ? std::chrono::milliseconds(200)
-                                                         : std::chrono::milliseconds(2000);
+        idr_urgent_ = false;
         if (idr_requested_.load() &&
             clk::now() - last_idr > std::chrono::milliseconds(2000)) {
             idr_requested_ = false;
@@ -1772,7 +1810,7 @@ void TakionServer::video_thread(sockaddr_in addr, ClientSession* s) {
             break;
         }
 
-        const uint32_t period = (n < 2 * VIDEO_FPS) ? VIDEO_FPS / 2 : VIDEO_FPS * 60;
+        const uint32_t period = VIDEO_FPS * 60;   // без повторных IDR на старте: клиент подтверждает STREAMINFO до видео
         if (n && n % period == 0) { encoder_->force_idr(); last_idr = clk::now(); ++idr_per; }
 
         if (encode_send()) {
@@ -1805,6 +1843,12 @@ void TakionServer::video_thread(sockaddr_in addr, ClientSession* s) {
             t_cap = t_enc = t_send = 0; late = 0; white_frames = 0;
         }
 
+        if (clk::now() >= next_cq) {
+            next_cq += std::chrono::seconds(1);
+            const auto cq = build_connection_quality_protobuf((uint32_t)target_bps_.load());
+            send_data_msg(addr, *s, 0, cq.data(), cq.size());     // тип данных 0 = protobuf (у rumble это 7)
+        }
+        
         // сторожевой таймер: нет пакетов геймпада > 3 с — отпустить всё (один раз)
         if (s->pad_active && now_ms() - s->last_rx_ms > 3000) {
             pad().reset();

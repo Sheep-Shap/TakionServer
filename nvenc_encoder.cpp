@@ -98,7 +98,11 @@ bool NvencEncoder::initialize(int w, int h, int fps, int bitrate_bps, int max_bi
     NV_CHECK(d.api.nvEncOpenEncodeSessionEx(&op, &d.enc), "OpenEncodeSessionEx");
 
     const GUID codec = NV_ENC_CODEC_HEVC_GUID;
-    const GUID preset = NV_ENC_PRESET_P3_GUID;
+    static const GUID kPresets[7] = { NV_ENC_PRESET_P1_GUID, NV_ENC_PRESET_P2_GUID, NV_ENC_PRESET_P3_GUID,
+                                  NV_ENC_PRESET_P4_GUID, NV_ENC_PRESET_P5_GUID, NV_ENC_PRESET_P6_GUID,
+                                  NV_ENC_PRESET_P7_GUID };
+    const int pi = s_preset < 1 ? 1 : (s_preset > 7 ? 7 : s_preset);
+    const GUID preset = kPresets[pi - 1];
     const NV_ENC_TUNING_INFO tuning = NV_ENC_TUNING_INFO_ULTRA_LOW_LATENCY;
 
     NV_ENC_PRESET_CONFIG pc{};
@@ -124,12 +128,13 @@ bool NvencEncoder::initialize(int w, int h, int fps, int bitrate_bps, int max_bi
     cp.capsToQuery = NV_ENC_CAPS_SUPPORT_INTRA_REFRESH;
     int ir_ok = 0;
     d.api.nvEncGetEncodeCaps(d.enc, codec, &cp, &ir_ok);
-    if (ir_ok) {
-        hc.enableIntraRefresh = 0;
+    const bool ir_on = ir_ok && s_intra_refresh;
+    hc.enableIntraRefresh = ir_on ? 1 : 0;
+    if (ir_on) {
         hc.intraRefreshPeriod = 60;   // новый цикл каждую секунду при 60 fps
         hc.intraRefreshCnt    = 20;   // экран обновляется за 20 кадров (~0,33 с)
     }
-    std::cout << "[nvenc] intra refresh: " << (ir_ok ? "on" : "unsupported") << "\n";
+    std::cout << "[nvenc] intra refresh: " << (ir_on ? "on" : (ir_ok ? "off" : "unsupported")) << "\n";
     d.cfg.rcParams.enableAQ = 1;
     d.cfg.rcParams.enableLookahead = 0;
     d.cfg.rcParams.zeroReorderDelay = 1;

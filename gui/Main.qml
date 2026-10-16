@@ -292,7 +292,7 @@ ApplicationWindow {
         id: side
         x: 60; y: 130; width: win.sideW; height: parent.height - 160
         onCurrentIndexChanged: { win.rowIndex = 0; win.syncRows() }
-        model: 3
+        model: 4
         currentIndex: 0; spacing: 14; interactive: false
         property int lastHover: -1
 
@@ -405,7 +405,7 @@ ApplicationWindow {
                 x: 40; anchors.verticalCenter: parent.verticalCenter
                 width: parent.width - 52
                 elide: Text.ElideRight
-                text: win.tx(["menu_server", "menu_settings", "menu_log"][index])
+                text: win.tx(["menu_server", "menu_settings", "menu_encoder", "menu_log"][index])
                 font.pixelSize: 22; font.weight: Font.DemiBold
                 color: (it.ListView.isCurrentItem || it.hot) ? "#aab2e6" : "#7f86b5"
                 Behavior on color { ColorAnimation { duration: 300 } }
@@ -502,6 +502,45 @@ ApplicationWindow {
                 onClicked: backend.cycleLanguage()
                 trailing: Text { text: backend.language === "ru" ? "Русский" : "English"
                                  color: "#ffffff"; font.pixelSize: 20 }
+            }
+            PsRow {
+                title: win.tx("save")
+                subtitle: win.tx("save_sub")
+                onClicked: backend.saveSettings()
+            }
+        }
+
+        PsPage {
+            onRowHovered: (item) => win.hoverRow(item)
+            PsRow {
+                title: win.tx("encoder")
+                subtitle: win.tx("encoder_sub")
+                adjustable: true
+                onAdjust: (dir) => backend.cycleEncoder(dir)
+                onClicked: backend.cycleEncoder(1)
+                trailing: Text { text: backend.encoderName; color: "#ffffff"; font.pixelSize: 20 }
+            }
+            PsRow {
+                title: win.tx("nvenc_preset")
+                subtitle: win.tx("nvenc_preset_sub")
+                adjustable: true
+                onAdjust: (dir) => backend.adjustPreset(dir)
+                onClicked: backend.adjustPreset(1)
+                trailing: Text { text: "P" + backend.nvencPreset; color: "#ffffff"; font.pixelSize: 20 }
+            }
+            PsRow {
+                title: win.tx("amf_preset")
+                subtitle: win.tx("amf_preset_sub")
+                adjustable: true
+                onAdjust: (dir) => backend.cycleAmfPreset(dir)
+                onClicked: backend.cycleAmfPreset(1)
+                trailing: Text { text: backend.amfPresetName; color: "#ffffff"; font.pixelSize: 20 }
+            }
+            PsRow {
+                title: win.tx("intra_refresh")
+                subtitle: win.tx("intra_refresh_sub")
+                trailing: PsSwitch { checked: backend.intraRefresh }
+                onClicked: backend.intraRefresh = !backend.intraRefresh
             }
             PsRow {
                 title: win.tx("save")

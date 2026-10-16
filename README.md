@@ -1,7 +1,7 @@
 # Takion Host (unofficial Remote Play server for Windows)
 
 Experimental Windows server that lets Chiaki-compatible Remote Play clients (for example
-[chiaki-ng](https://github.com/chiaki-ng/chiaki-ng) on Android) connect to your **PC** and stream the
+[chiaki-ng](https://github.com/chiaki-ng/chiaki-ng) or Pylux on Android) connect to your **PC** and stream the
 desktop or a game: video (HEVC), audio (Opus) and gamepad input through a virtual controller.
 The official Sony PS Remote Play app is **not** supported.
 
@@ -12,13 +12,15 @@ The official Sony PS Remote Play app is **not** supported.
 ## Features
 
 - Registration (PIN), session init and Takion stream compatible with Chiaki clients
+- The PC shows up in the client's console list (discovery on UDP 9302), so it can be registered without typing an IP
 - Video encoding with **AMD AMF** or **NVIDIA NVENC** (HEVC), DXGI screen capture
+- Encoder settings in the GUI: encoder choice, NVENC preset (P1-P7), AMF preset (speed / balanced / quality), intra refresh
 - Reed-Solomon FEC and packet pacing in a separate sender thread
-- Senkusha (RTT / MTU probe) responder, so clients no longer wait for a timeout before the stream starts
-- NVENC intra refresh when the GPU supports it (self-healing picture after packet loss)
 - Audio capture and Opus streaming
 - Virtual gamepad via ViGEm: DualShock 4 or Xbox 360 (`controller_type` in `server.ini`)
 - Bitrate limits that follow the client's request
+- Senkusha (RTT / MTU probe) responder, so clients do not wait for a timeout before the stream starts
+- Connection-quality messages, so the client's stats overlay shows the measured bitrate
 - Qt GUI (Russian / English) to start the server and edit settings
 
 ## Requirements
@@ -60,23 +62,13 @@ folder and reads and writes `server.ini` and `gui.ini` there.
 
 1. Create a folder (for example `C:\takion-host`) and copy into it:
    - `takion-host.exe` from `build\Release`
-   - everything from `gui\build\Release` (`takion_gui.exe` and the Qt DLLs/plugins from `windeployqt`)
+   - everything from `gui\build\Release` (the GUI executable and the Qt DLLs/plugins from `windeployqt`)
 2. Copy `server.ini.example` to `server.ini` in that folder and edit it
    (set `rp_key = auto` to generate your own key).
-3. Start `takion_gui.exe` (or run `takion-host.exe` directly from a console).
-4. The 8-digit registration PIN is shown on start. In the client choose manual registration, enter the PC
-   address and the PIN.
-
-## Settings (`server.ini`)
-
-| Key | Meaning |
-|---|---|
-| `pin` | 8-digit registration PIN |
-| `rp_key` | 32 hex characters or `auto` |
-| `bitrate_max_mbps` / `bitrate_min_mbps` | Video bitrate limits, Mbit/s |
-| `adaptive_bitrate` | Lower/raise bitrate from loss reports |
-| `respect_client_bitrate` | Do not exceed the bitrate asked by the client |
-| `controller_type` | `ds4` or `x360` |
+3. Start the GUI (or run `takion-host.exe` directly from a console).
+4. Allow the ports below in Windows Firewall (private network).
+5. The 8-digit registration PIN is shown on start. In the client either pick the PC from the list of
+   discovered consoles, or choose manual registration and enter the PC address; then enter the PIN.
 
 ## Network ports
 
@@ -84,25 +76,52 @@ Allow these ports for `takion-host.exe` in Windows Firewall (private network):
 
 | Port | Protocol | Purpose |
 |---|---|---|
-| 9295 | TCP + UDP | Discovery, registration, session init and control channel |
+| 9295 | TCP + UDP | Registration, session init, control channel, registration search (`SRC3`) |
 | 9296 | UDP | Takion stream (video, audio, gamepad) |
 | 9297 | UDP | Senkusha (RTT / MTU test) |
+| 9302 | UDP | Console discovery (`SRCH`) |
+
+## Settings (`server.ini`)
+
+Most video settings can be changed in the GUI (tab "Encoder"); changes apply on the next server start.
+
+| Key | Meaning |
+|---|---|
+| `pin` | 8-digit registration PIN |
+| `nickname` | Console name shown in the client (1-32 characters) |
+| `rp_key` | 32 hex characters or `auto` |
+| `encoder` | `auto`, `nvenc` or `amf` |
+| `nvenc_preset` | NVENC preset 1 (fastest) to 7 (best quality); 3 is a good default |
+| `amf_preset` | AMD AMF preset: `speed`, `balanced` or `quality` |
+| `intra_refresh` | `1` / `0`: experimental intra refresh for the active encoder (off by default) |
+| `bitrate_max_mbps` / `bitrate_min_mbps` | Video bitrate limits, Mbit/s |
+| `adaptive_bitrate` | Lower/raise bitrate from loss reports |
+| `respect_client_bitrate` | Do not exceed the bitrate asked by the client |
+| `controller_type` | `ds4` or `x360` |
+
+Changing `nickname` or `rp_key` changes the console identity: delete the old entry in the client and register again.
 
 ## Troubleshooting
 
-**Artifacts or broken picture.** Keep the video bitrate close to what the client asks for
-(about 10 Mbit/s over Wi-Fi). Set `respect_client_bitrate = 1` and a moderate
-`bitrate_max_mbps`. Very high limits make the encoder produce huge frames (especially IDR
-frames) that do not fit into the FEC budget and are easily lost on Wi-Fi. At startup the console
-should print a line like `[nvenc] target=10000000 ...` when the client's bitrate is applied.
+**Artifacts or a broken picture.** Keep the video bitrate close to what the client asks for (about
+10 Mbit/s over Wi-Fi). Set `respect_client_bitrate = 1` and a moderate `bitrate_max_mbps`. Very high limits make
+the encoder produce huge frames (especially IDR frames) that do not fit into the FEC budget and are easily lost
+on Wi-Fi. At startup the console should print a line like `[nvenc] target=10000000 ...` (or `[amf] target=...`)
+when the client's bitrate is applied. Use 5 GHz Wi-Fi or Ethernet and disable Wi-Fi power saving on the phone.
 
-**The stream starts slowly (about 15 seconds).** The client probably cannot reach the Senkusha
-responder. Make sure UDP port 9297 is allowed in the firewall. The console prints
-`[senkusha] responder listening on UDP 9297` on start, and the client log should show
+**The stream starts slowly.** The client probably cannot reach the Senkusha responder. Make sure UDP port 9297 is
+allowed. The console prints `[senkusha] responder listening on UDP 9297` on start, and the client log should show
 `Senkusha determined average RTT` instead of `Senkusha connect timeout`.
 
-**Client log shows `FEC failed` / `Missing unit`.** Packets are lost between the PC and the
-client. Use 5 GHz Wi-Fi or Ethernet, disable Wi-Fi power saving on the phone and lower the bitrate.
+**The PC is not in the client's console list.** Make sure UDP port 9302 is allowed and that the phone and the PC are
+in the same subnet. The console prints `[discovery] listening on UDP 9302 ...` on start and
+`[discovery] search from ...` for every search. If the client does not use the standard search, register by IP.
+
+**`AMF factory not initialized` or `Failed to initialize video encoder`.** Update the GPU driver. With
+`encoder = amf` the AMD AMF runtime (`amfrt64.dll`) must be present.
+
+**Client log shows `FEC failed` / `Missing unit`.** Packets are lost between the PC and the client, or the frame
+was too large for the FEC budget. Lower the bitrate and prefer 5 GHz Wi-Fi or Ethernet.
 
 ## Known limitations
 
@@ -110,6 +129,9 @@ client. Use 5 GHz Wi-Fi or Ethernet, disable Wi-Fi power saving on the phone and
 - Experimental: expect bugs, especially under heavy GPU load in games
 - No remote access over the Internet; use a local network (5 GHz Wi-Fi or Ethernet is recommended)
 - Senkusha supports the RTT and MTU tests only; the bandwidth command is ignored
+- Some clients show packet loss and dropped frames as 0 in their stats overlay; these are measured on the client
+- Gyro / motion data is parsed but not verified on real hardware
+- A small share of frames can still be lost on Wi-Fi and show short artifacts
 
 ## Changelog
 

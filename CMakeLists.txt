@@ -39,6 +39,7 @@ set(SOURCES
     audio_streamer.cpp
     audio_capture_win.cpp
     server_config.cpp
+    discovery_server.cpp
     nvenc_encoder.cpp
     fec_rs.cpp
 )
@@ -59,6 +60,8 @@ set(HEADERS
     audio_packet.h
     audio_capture.h
     server_config.h
+    host_identity.h
+    discovery_server.h
     bitrate_controller.h
     video_encoder.h
     nvenc_encoder.h

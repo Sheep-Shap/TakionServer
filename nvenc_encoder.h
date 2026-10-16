@@ -13,9 +13,12 @@ public:
     void force_idr() override { idr_requested_ = true; }
     bool set_bitrate(int bitrate_bps, int max_bitrate_bps) override;
     bool is_initialized() const override { return initialized_; }
+    static void set_options(int preset, bool intra_refresh) { s_preset = preset; s_intra_refresh = intra_refresh; }
     static bool available();   // есть nvEncodeAPI64.dll и видеокарта NVIDIA
     struct Impl;
 private:
+    static inline int  s_preset = 3;
+    static inline bool s_intra_refresh = true;
     std::unique_ptr<Impl> d_;
     std::atomic<bool> initialized_{false};
     std::atomic<bool> idr_requested_{false};

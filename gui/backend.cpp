@@ -17,6 +17,7 @@ static const QHash<QString, QStringList>& dict() {
     static const QHash<QString, QStringList> d = {
         {"menu_server",   {"Сервер", "Server"}},
         {"menu_settings", {"Настройки", "Settings"}},
+        {"menu_encoder",  {"Кодировщик", "Encoder"}},
         {"menu_log",      {"Журнал", "Log"}},
         {"start",         {"Запустить сервер", "Start server"}},
         {"stop",          {"Остановить сервер", "Stop server"}},
@@ -31,6 +32,14 @@ static const QHash<QString, QStringList>& dict() {
         {"save_sub",      {"Запись в server.ini", "Written to server.ini"}},
         {"controller",    {"Эмуляция геймпада", "Gamepad emulation"}},
         {"controller_sub",{"Применяется при следующем запуске сервера", "Applied on next server start"}},
+        {"encoder",       {"Видеокодировщик", "Video encoder"}},
+        {"encoder_sub",   {"Авто, NVIDIA NVENC или AMD AMF. Применяется при следующем запуске", "Auto, NVIDIA NVENC or AMD AMF. Applied on next server start"}},
+        {"nvenc_preset",  {"Пресет NVENC (NVIDIA)", "NVENC preset (NVIDIA)"}},
+        {"nvenc_preset_sub", {"P1 — быстрее, P7 — лучше качество", "P1 is fastest, P7 is best quality"}},
+        {"amf_preset",    {"Пресет AMF (AMD)", "AMF preset (AMD)"}},
+        {"amf_preset_sub", {"Скорость — меньше задержка, Качество — лучше картинка", "Speed gives lower latency, Quality gives a better picture"}},
+        {"intra_refresh", {"Intra refresh", "Intra refresh"}},
+        {"intra_refresh_sub", {"Экспериментально: картинка восстанавливается сама после потерь пакетов (NVENC и AMF)", "Experimental: picture heals itself after packet loss (NVENC and AMF)"}},
         {"language",      {"Язык", "Language"}},
         {"language_sub",  {"Применяется сразу", "Applied immediately"}},
         {"st_stopped",    {"Остановлен", "Stopped"}},
@@ -48,6 +57,30 @@ static const QHash<QString, QStringList>& dict() {
         {"n_no_exe",      {"Не найден takion-host.exe рядом с программой.", "takion-host.exe was not found next to the application."}},
     };
     return d;
+}
+
+static const QStringList kEncoderIds   = {"auto", "nvenc", "amf"};
+static const QStringList kEncoderNames = {"Auto", "NVIDIA NVENC", "AMD AMF"};
+static const QStringList kAmfPresetIds = {"speed", "balanced", "quality"};
+static const QStringList kAmfPresetEn  = {"Speed", "Balanced", "Quality"};
+static const QStringList kAmfPresetRu  = {"Скорость", "Баланс", "Качество"};
+
+QString ServerBackend::encoderName() const {
+    int i = kEncoderIds.indexOf(encoder_); return kEncoderNames.value(i < 0 ? 0 : i);
+}
+QString ServerBackend::amfPresetName() const {
+    const int i = qBound(0, amfPreset_, 2);
+    return (lang_ == "en" ? kAmfPresetEn : kAmfPresetRu).value(i);
+}
+void ServerBackend::cycleEncoder(int dir) {
+    int i = kEncoderIds.indexOf(encoder_); if (i < 0) i = 0;
+    i = (i + dir + kEncoderIds.size()) % kEncoderIds.size();
+    encoder_ = kEncoderIds[i]; emit settingsChanged();
+}
+void ServerBackend::adjustPreset(int dir) { nvencPreset_ = qBound(1, nvencPreset_ + dir, 7); emit settingsChanged(); }
+void ServerBackend::cycleAmfPreset(int dir) {
+    amfPreset_ = (amfPreset_ + dir + kAmfPresetIds.size()) % kAmfPresetIds.size();
+    emit settingsChanged();
 }
 
 QString ServerBackend::t(const QString& key) const {
@@ -72,6 +105,7 @@ void ServerBackend::cycleLanguage() {
     lang_ = (lang_ == "ru") ? "en" : "ru";
     QSettings(guiIniPath(), QSettings::IniFormat).setValue("language", lang_);
     emit languageChanged();
+    emit settingsChanged();
     emit statusChanged();
 }
 
@@ -166,6 +200,11 @@ void ServerBackend::loadSettings() {
     minMbps_ = iniValue("bitrate_min_mbps", "6").toDouble();
     adaptive_ = isTrue(iniValue("adaptive_bitrate", "0"));
     respect_ = isTrue(iniValue("respect_client_bitrate", "1"));
+    encoder_ = iniValue("encoder", "auto");
+    nvencPreset_ = iniValue("nvenc_preset", "3").toInt();
+    intraRefresh_ = isTrue(iniValue("intra_refresh", "0"));
+    amfPreset_ = qMax(0, kAmfPresetIds.indexOf(iniValue("amf_preset", "balanced").toLower()));
+    nvencPreset_ = qBound(1, nvencPreset_, 7);
     controller_ = iniValue("controller_type", "ds4");
     emit settingsChanged();
 }
@@ -176,6 +215,10 @@ void ServerBackend::saveSettings() {
         return;
     }
     setIniValue("controller_type", controller_);
+    setIniValue("encoder", encoder_);
+    setIniValue("nvenc_preset", QString::number(nvencPreset_));
+    setIniValue("amf_preset", kAmfPresetIds.value(qBound(0, amfPreset_, 2)));
+    setIniValue("intra_refresh", intraRefresh_ ? "1" : "0");
     setIniValue("bitrate_max_mbps", QString::number(maxMbps_, 'f', 1));
     setIniValue("bitrate_min_mbps", QString::number(minMbps_, 'f', 1));
     setIniValue("adaptive_bitrate", adaptive_ ? "1" : "0");
@@ -195,7 +238,7 @@ void ServerBackend::toggleServer() {
     proc_.setArguments({"--gui-control", "--random-pin"});
     proc_.setWorkingDirectory(QFileInfo(serverExe()).absolutePath());
     proc_.start();
-    setStatus("Запуск…");
+    setStatus("st_starting");
 }
 
 void ServerBackend::stopServer() {

@@ -95,6 +95,7 @@ public:
 
     void set_net_config(const NetConfig& c) { net_cfg_ = c; }
     void set_session_source(SessionSource s) { session_source_ = std::move(s); }
+    void select_encoder(const std::string& mode);   // "auto" | "nvenc" | "amf"; call before start()
 
 private:
     void handle_packet(const std::vector<uint8_t>& data, const sockaddr_in& addr);

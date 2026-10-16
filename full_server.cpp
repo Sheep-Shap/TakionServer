@@ -1,4 +1,5 @@
 #include "full_server.h"
+#include "host_identity.h"
 
 #include <algorithm>
 #include <atomic>
@@ -345,7 +346,7 @@ void FullServer::handle_regist(Handle sock, bool is_ps5, const std::vector<uint8
 
     uint8_t regist_key[16], mac[6];
     random_bytes(regist_key, sizeof(regist_key));
-    random_bytes(mac, sizeof(mac));
+    derive_host_mac(cfg_.nickname, to_hex(cfg_.rp_key.data(), 16), mac);
     srv_log("Regist: RP-Key (fixed) = " + to_hex(cfg_.rp_key.data(), 16));
 
     const std::string plain = build_response_plaintext(regist_key, cfg_.rp_key, mac, cfg_.nickname, is_ps5);

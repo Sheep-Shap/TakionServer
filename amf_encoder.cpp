@@ -1,4 +1,5 @@
 #include "amf_encoder.h"
+#include "encoder_options.h"
 #include <iostream>
 #include <cstring>
 #include <windows.h>
@@ -65,7 +66,12 @@ static void TerminateAMF() {
     }
 }
 
+// Фабрика и DLL общие для всех экземпляров AMFEncoder, поэтому выгружаем их только вместе с последним.
+// Иначе при замене кодировщика (select_encoder) деструктор старого убивал фабрику нового.
+static int g_amf_refs = 0;
+
 AMFEncoder::AMFEncoder() {
+    ++g_amf_refs;
     if (!InitAMF()) {
         std::cerr << "AMF initialization failed\n";
     }
@@ -73,7 +79,10 @@ AMFEncoder::AMFEncoder() {
 
 AMFEncoder::~AMFEncoder() {
     shutdown();
-    TerminateAMF();
+    if (--g_amf_refs <= 0) {
+        g_amf_refs = 0;
+        TerminateAMF();
+    }
 }
 
 bool AMFEncoder::initialize(int width, int height, int fps, int bitrate_bps, int max_bitrate_bps) {
@@ -142,7 +151,6 @@ bool AMFEncoder::create_encoder(int width, int height, int fps, int bitrate_bps,
     }
 
     encoder_->SetProperty(AMF_VIDEO_ENCODER_HEVC_USAGE, AMF_VIDEO_ENCODER_HEVC_USAGE_ULTRA_LOW_LATENCY);
-    encoder_->SetProperty(AMF_VIDEO_ENCODER_HEVC_QUALITY_PRESET, AMF_VIDEO_ENCODER_HEVC_QUALITY_PRESET_SPEED);
     encoder_->SetProperty(AMF_VIDEO_ENCODER_HEVC_RATE_CONTROL_METHOD, AMF_VIDEO_ENCODER_HEVC_RATE_CONTROL_METHOD_PEAK_CONSTRAINED_VBR);
     encoder_->SetProperty(AMF_VIDEO_ENCODER_HEVC_ENFORCE_HRD, false);
     encoder_->SetProperty(AMF_VIDEO_ENCODER_HEVC_PRE_ANALYSIS_ENABLE, false);
@@ -158,6 +166,24 @@ bool AMFEncoder::create_encoder(int width, int height, int fps, int bitrate_bps,
     encoder_->SetProperty(AMF_VIDEO_ENCODER_HEVC_PROFILE, AMF_VIDEO_ENCODER_HEVC_PROFILE_MAIN);
     encoder_->SetProperty(AMF_VIDEO_ENCODER_HEVC_PROFILE_LEVEL, AMF_LEVEL_5_1);
     encoder_->SetProperty(AMF_VIDEO_ENCODER_HEVC_COLOR_BIT_DEPTH, AMF_COLOR_BIT_DEPTH_8);
+
+    // пресет из server.ini: 0 speed, 1 balanced, 2 quality (до Init)
+    static const amf_int64 kPresets[3] = {
+        AMF_VIDEO_ENCODER_HEVC_QUALITY_PRESET_SPEED,
+        AMF_VIDEO_ENCODER_HEVC_QUALITY_PRESET_BALANCED,
+        AMF_VIDEO_ENCODER_HEVC_QUALITY_PRESET_QUALITY };
+    const int pi = EncoderOptions::amf_preset < 0 ? 0 : (EncoderOptions::amf_preset > 2 ? 2 : EncoderOptions::amf_preset);
+    encoder_->SetProperty(AMF_VIDEO_ENCODER_HEVC_QUALITY_PRESET, kPresets[pi]);
+    std::cout << "[amf] preset: " << (pi == 0 ? "speed" : (pi == 1 ? "balanced" : "quality")) << "\n";
+
+    if (EncoderOptions::intra_refresh) {
+        const int ctbs = ((width + 63) / 64) * ((height + 63) / 64);       // CTB 64x64: для 1080p 30x17 = 510
+        const AMF_RESULT ir = encoder_->SetProperty(
+            AMF_VIDEO_ENCODER_HEVC_INTRA_REFRESH_NUM_CTBS_PER_SLOT, (amf_int64)((ctbs + 19) / 20));   // ~20 кадров на цикл
+        std::cout << "[amf] intra refresh: " << (ir == AMF_OK ? "on" : "unsupported") << "\n";
+    } else {
+        std::cout << "[amf] intra refresh: off\n";
+    }
 
     AMF_RESULT r = encoder_->SetProperty(AMF_VIDEO_ENCODER_HEVC_INSERT_AUD, false);
     if (r != AMF_OK) std::cerr << "INSERT_AUD not accepted: " << (int)r << "\n";

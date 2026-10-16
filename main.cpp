@@ -10,10 +10,14 @@
 #include "takion_server.h"
 #include "full_server.h"
 #include "server_config.h"
+#include "discovery_server.h"
 #include "virtual_pad.h"
+#include "nvenc_encoder.h"   // NvencEncoder::set_options
+#include "encoder_options.h"
 #include <timeapi.h>        // + линковка winmm.lib
 
 static TakionServer* g_server = nullptr;
+static DiscoveryServer g_discovery;
 
 void signal_handler(int signum) {
     std::cout << "\nReceived signal " << signum << ", shutting down...\n";
@@ -74,6 +78,8 @@ int main(int argc, char** argv) {
         return 1;
     }
 
+    g_discovery.start(9302, sc.nickname, sc.rp_key_hex);
+
     timeBeginPeriod(1);
     WSADATA wsa_data;
     if (WSAStartup(MAKEWORD(2, 2), &wsa_data) != 0) {
@@ -108,6 +114,12 @@ int main(int argc, char** argv) {
 
     set_pad_type(sc.controller_type);
 
+    NvencEncoder::set_options(sc.nvenc_preset, sc.intra_refresh);
+    EncoderOptions::nvenc_preset  = sc.nvenc_preset;
+    EncoderOptions::amf_preset    = sc.amf_preset == "speed" ? 0 : (sc.amf_preset == "quality" ? 2 : 1);
+    EncoderOptions::intra_refresh = sc.intra_refresh;
+    server.select_encoder(sc.encoder);
+
     if (!server.start(sc.takion_port)) {
         std::cerr << "Failed to start Takion server\n";
         WSACleanup();
@@ -122,6 +134,7 @@ int main(int argc, char** argv) {
 
     server.stop();
     g_server = nullptr;
+    g_discovery.stop();
     WSACleanup();
     full.stop();
     timeEndPeriod(1);

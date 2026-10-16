@@ -53,15 +53,23 @@ const char* kDefaultText =
     "session_state_file =\n"
     "# 1 = print every Ctrl message sent by the client\n"
     "log_ctrl_messages = 0\n"
+    "# Video encoder: auto, nvenc (NVIDIA) or amf (AMD).\n"
+    "encoder = auto\n"
+    "# NVENC preset 1 (fastest) .. 7 (best quality). 3 is a good low-latency default.\n"
+    "nvenc_preset = 3\n"
+    "# AMD AMF preset: speed, balanced or quality.\n"
+    "amf_preset = balanced\n"
+    "# Intra refresh for the active encoder (experimental): 1 or 0.\n"
+    "intra_refresh = 0\n"
     "# Video bitrate in Mbit/s. bitrate_max_mbps is the fixed bitrate unless adaptive_bitrate = 1,\n"
     "# in which case it is the start value and the ceiling, and bitrate_min_mbps is the floor.\n"
     "adaptive_bitrate = 0\n"
     "bitrate_min_mbps = 6\n"
     "bitrate_max_mbps = 20\n"
     "# 1 = never exceed the bitrate the client asks for (bwKbpsSent), 0 = always use bitrate_max_mbps.\n"
+    "respect_client_bitrate = 1\n"
     "# Emulated gamepad: ds4 (DualShock 4) or x360 (Xbox 360).\n"
-    "controller_type = ds4\n"
-    "respect_client_bitrate = 1\n";
+    "controller_type = ds4\n";
 
 }  // namespace
 
@@ -149,6 +157,20 @@ bool load_server_config(const std::string& path, ServerConfig& cfg, std::string&
             cfg.session_state_file = val;
         } else if (key == "log_ctrl_messages") {
             cfg.log_ctrl_messages = is_true(val);
+        } else if (key == "encoder") {
+            const std::string v = lower(val);
+            if (v != "auto" && v != "nvenc" && v != "amf") { err = "encoder must be auto, nvenc or amf"; return false; }
+            cfg.encoder = v;
+        } else if (key == "nvenc_preset") {
+            const int p = std::atoi(val.c_str());
+            cfg.nvenc_preset = p < 1 ? 1 : (p > 7 ? 7 : p);
+        } else if (key == "amf_preset") {
+            const std::string v = lower(val);
+            if (v != "speed" && v != "balanced" && v != "quality") { err = "amf_preset must be speed, balanced or quality"; return false; }
+            cfg.amf_preset = v;
+        } else if (key == "intra_refresh") {
+            const std::string v = lower(val);
+            cfg.intra_refresh = (v == "1" || v == "true" || v == "yes");
         } else if (key == "controller_type") {
             const std::string v = lower(val);
             cfg.controller_type = (v.find("360") != std::string::npos || v.find("xbox") != std::string::npos)
